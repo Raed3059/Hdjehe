@@ -1,0 +1,15 @@
+{
+  "name": "discord-quiz-bot",
+  "version": "1.0.0",
+  "description": "بوت أسئلة وأجوبة مع رتب تلقائية - جاهز للنشر على Railway",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": ["discord", "bot", "quiz", "railway"],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.15.3"
+  }
+}
