@@ -30,7 +30,7 @@ const { Routes } = require('discord-api-types/v10');
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 // ⚠️ استبدل هذا بـ Client ID الخاص بك من https://discord.com/developers/applications
-const CLIENT_ID = '1416077051617869927'; // ← ضع هنا معرف التطبيق (Application ID)
+const CLIENT_ID = '1416077051617869927#'; // ← ضع هنا معرف التطبيق (Application ID)
 
 const commands = [
   {
@@ -172,8 +172,7 @@ client.on('interactionCreate', async interaction => {
       const choice = values[0];
       switch (choice) {
         case 'add_questions_session':
-          // ⚠️ تأجيل التحديث لتمكين فتح النموذج
-          await interaction.deferUpdate();
+          // ✅ لا تستخدم deferUpdate() — نفتح النموذج مباشرةً!
           adminQuestionSession[interaction.user.id] = [];
           await showAddQuestionModal(interaction, true);
           break;
@@ -429,14 +428,12 @@ client.on('interactionCreate', async interaction => {
       }
     }
 
-    // ✅ NEW: معالجة زر "+ أضف سؤالًا ثانيًا"
+    // ✅ معالجة زر "أضف سؤالًا ثانيًا"
     if (interaction.customId === 'add_another_question') {
-      // تأجيل التحديث قبل فتح النموذج
-      await interaction.deferUpdate();
       await showAddQuestionModal(interaction, false);
     }
 
-    // ✅ NEW: معالجة زر "إرسال الإجابات" (إذا أضفته لاحقًا)
+    // ✅ معالجة زر "إرسال الإجابات" (إذا أضفته لاحقًا)
     if (interaction.customId === 'submit_answers') {
       await interaction.reply({ content: '✅ تم إرسال إجاباتك!', ephemeral: true });
     }
@@ -519,7 +516,7 @@ async function showAddQuestionModal(interaction, isFirst) {
     new ActionRowBuilder().addComponents(correctInput)
   );
 
-  // ✅ الآن نفتح النموذج مباشرةً — لأننا استخدمنا deferUpdate() قبل ذلك
+  // ✅ فتح النموذج مباشرةً — بدون أي تدخل سابق
   await interaction.showModal(modal);
 }
 
