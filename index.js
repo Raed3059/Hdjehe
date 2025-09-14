@@ -22,7 +22,7 @@ const client = new Client({
 });
 
 // =============================
-// ✅ تسجيل الأوامر Slash تلقائيًا (مهم جدًا!)
+// ✅ تسجيل الأوامر Slash تلقائيًا
 // =============================
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v10');
@@ -30,7 +30,7 @@ const { Routes } = require('discord-api-types/v10');
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 // ⚠️ استبدل هذا بـ Client ID الخاص بك من https://discord.com/developers/applications
-const CLIENT_ID = '1416077051617869927#'; // ← ضع هنا معرف التطبيق (Application ID)
+const CLIENT_ID = '1416077051617869927'; // ← ضع هنا معرف التطبيق (Application ID)
 
 const commands = [
   {
@@ -140,7 +140,11 @@ client.on('interactionCreate', async interaction => {
         ])
     );
 
-    await interaction.reply({ content: '✅ مرحبًا يا أفضل مالك! نورتني ❤️', components: [row], ephemeral: true });
+    // ✅ ✅ ✅ التعديل الحاسم: استخدام deferReply بدل reply
+    await interaction.deferReply({ ephemeral: true });
+
+    // ✅ ثم نرسل القائمة المنبثقة
+    await interaction.editReply({ content: '✅ مرحبًا يا أفضل مالك! نورتني ❤️', components: [row] });
   }
 
   // ----------------------------
@@ -159,7 +163,9 @@ client.on('interactionCreate', async interaction => {
         ])
     );
 
-    await interaction.reply({ content: 'مرحبًا بك في لعبة الأسئلة! 🎯 جاوب واحصل على الرتبة تلقائيًا', components: [row], ephemeral: true });
+    // ✅ ✅ ✅ نفس التعديل هنا
+    await interaction.deferReply({ ephemeral: true });
+    await interaction.editReply({ content: 'مرحبًا بك في لعبة الأسئلة! 🎯 جاوب واحصل على الرتبة تلقائيًا', components: [row] });
   }
 
   // ----------------------------
@@ -172,7 +178,8 @@ client.on('interactionCreate', async interaction => {
       const choice = values[0];
       switch (choice) {
         case 'add_questions_session':
-          // ✅ لا تستخدم deferUpdate() — نفتح النموذج مباشرةً!
+          // ✅ نستخدم deferUpdate() لأننا سنفتح نموذجًا
+          await interaction.deferUpdate();
           adminQuestionSession[interaction.user.id] = [];
           await showAddQuestionModal(interaction, true);
           break;
@@ -432,11 +439,6 @@ client.on('interactionCreate', async interaction => {
     if (interaction.customId === 'add_another_question') {
       await showAddQuestionModal(interaction, false);
     }
-
-    // ✅ معالجة زر "إرسال الإجابات" (إذا أضفته لاحقًا)
-    if (interaction.customId === 'submit_answers') {
-      await interaction.reply({ content: '✅ تم إرسال إجاباتك!', ephemeral: true });
-    }
   }
 });
 
@@ -516,7 +518,7 @@ async function showAddQuestionModal(interaction, isFirst) {
     new ActionRowBuilder().addComponents(correctInput)
   );
 
-  // ✅ فتح النموذج مباشرةً — بدون أي تدخل سابق
+  // ✅ فتح النموذج مباشرةً — بعد deferUpdate() أو deferReply()
   await interaction.showModal(modal);
 }
 
@@ -672,7 +674,7 @@ async function showCountEmbed(interaction, title, count, members) {
 // ----------------------------
 // تشغيل البوت
 // ----------------------------
-registerCommands(); // ← تسجيل الأوامر عند بدء التشغيل
+registerCommands();
 
 client.once('ready', () => {
   console.log(`✅ البوت متصل باسم: ${client.user.tag}`);
