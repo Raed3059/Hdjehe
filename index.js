@@ -140,10 +140,8 @@ client.on('interactionCreate', async interaction => {
         ])
     );
 
-    // ✅ ✅ ✅ التعديل الحاسم: استخدام deferReply بدل reply
+    // ✅ ✅ ✅ الحل السحري: استخدام deferReply ثم editReply
     await interaction.deferReply({ ephemeral: true });
-
-    // ✅ ثم نرسل القائمة المنبثقة
     await interaction.editReply({ content: '✅ مرحبًا يا أفضل مالك! نورتني ❤️', components: [row] });
   }
 
@@ -163,7 +161,7 @@ client.on('interactionCreate', async interaction => {
         ])
     );
 
-    // ✅ ✅ ✅ نفس التعديل هنا
+    // ✅ ✅ ✅ نفس الحل هنا
     await interaction.deferReply({ ephemeral: true });
     await interaction.editReply({ content: 'مرحبًا بك في لعبة الأسئلة! 🎯 جاوب واحصل على الرتبة تلقائيًا', components: [row] });
   }
@@ -178,7 +176,7 @@ client.on('interactionCreate', async interaction => {
       const choice = values[0];
       switch (choice) {
         case 'add_questions_session':
-          // ✅ نستخدم deferUpdate() لأننا سنفتح نموذجًا
+          // ✅ تأجيل التحديث قبل فتح النموذج
           await interaction.deferUpdate();
           adminQuestionSession[interaction.user.id] = [];
           await showAddQuestionModal(interaction, true);
@@ -518,7 +516,7 @@ async function showAddQuestionModal(interaction, isFirst) {
     new ActionRowBuilder().addComponents(correctInput)
   );
 
-  // ✅ فتح النموذج مباشرةً — بعد deferUpdate() أو deferReply()
+  // ✅ فتح النموذج مباشرةً بعد deferUpdate()
   await interaction.showModal(modal);
 }
 
