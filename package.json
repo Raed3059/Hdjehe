@@ -7,7 +7,9 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.15.3"
+    "discord.js": "^14.15.3",
+    "@discordjs/rest": "^2.2.0",
+    "discord-api-types": "^0.37.6"
   },
   "keywords": ["discord", "bot", "quiz", "role", "dropdown", "railway"],
   "author": "Your Name",

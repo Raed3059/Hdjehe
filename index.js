@@ -1,7 +1,9 @@
 const { Client, IntentsBitField, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const fs = require('fs');
 
-// استلام التوكن من البيئة
+// =============================
+// ✅ إعدادات البوت
+// =============================
 const TOKEN = process.env.DISCORD_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
@@ -19,7 +21,44 @@ const client = new Client({
   ]
 });
 
-// تحميل قاعدة البيانات أو إنشاؤها
+// =============================
+// ✅ تسجيل الأوامر Slash تلقائيًا (مهم جدًا!)
+// =============================
+const { REST } = require('@discordjs/rest');
+const { Routes } = require('discord-api-types/v10');
+
+const rest = new REST({ version: '10' }).setToken(TOKEN);
+
+// ⚠️ استبدل هذا بـ Client ID الخاص بك من https://discord.com/developers/applications
+const CLIENT_ID = '1416077051617869927'; // ← ضع هنا معرف التطبيق (Application ID)
+
+const commands = [
+  {
+    name: 'menu',
+    description: 'لوحة تحكم للمالك فقط (يجب أن تكون مالكًا)',
+  },
+  {
+    name: 'setmenu',
+    description: 'لوحة الأسئلة للأعضاء للإجابة ورؤية النتائج',
+  }
+];
+
+async function registerCommands() {
+  try {
+    console.log('🔄 جارٍ تسجيل الأوامر عالميًا...');
+    await rest.put(
+      Routes.applicationCommands(CLIENT_ID),
+      { body: commands }
+    );
+    console.log('✅ تم تسجيل الأوامر بنجاح عالميًا!');
+  } catch (error) {
+    console.error('❌ خطأ أثناء تسجيل الأوامر:', error);
+  }
+}
+
+// =============================
+// ✅ قاعدة البيانات
+// =============================
 let data = {};
 const DATA_FILE = './data.json';
 
@@ -69,12 +108,15 @@ loadData();
 // تخزين جلسة إضافة أسئلة للمالك
 const adminQuestionSession = {};
 
+// =============================
+// ✅ معالجة التفاعلات
+// =============================
 client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand() && !interaction.isStringSelectMenu() && !interaction.isModalSubmit() && !interaction.isButton()) return;
 
-  // =======================
+  // ----------------------------
   // أمر /menu للمالك
-  // =======================
+  // ----------------------------
   if (interaction.isCommand() && interaction.commandName === 'menu') {
     if (interaction.user.id !== OWNER_ID) {
       return interaction.reply({ content: '❌ هذا الأمر مخصص للمالك فقط!', ephemeral: true });
@@ -101,9 +143,9 @@ client.on('interactionCreate', async interaction => {
     await interaction.reply({ content: '✅ مرحبًا يا أفضل مالك! نورتني ❤️', components: [row], ephemeral: true });
   }
 
-  // =======================
+  // ----------------------------
   // أمر /setmenu للأعضاء
-  // =======================
+  // ----------------------------
   if (interaction.isCommand() && interaction.commandName === 'setmenu') {
     const row = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
@@ -120,9 +162,9 @@ client.on('interactionCreate', async interaction => {
     await interaction.reply({ content: 'مرحبًا بك في لعبة الأسئلة! 🎯 جاوب واحصل على الرتبة تلقائيًا', components: [row], ephemeral: true });
   }
 
-  // =======================
+  // ----------------------------
   // معالجة القوائم المنبثقة (Dropdowns)
-  // =======================
+  // ----------------------------
   if (interaction.isStringSelectMenu()) {
     const { customId, values } = interaction;
 
@@ -175,7 +217,7 @@ client.on('interactionCreate', async interaction => {
           await showCountEmbed(interaction, 'من أجابوا بشكل صحيح:', data.usersCorrect.length, data.usersCorrect.map(id => `<@${id}>`).join(', ') || 'لا أحد');
           break;
         case 'check_attempts':
-          const userId = interaction.user.id; // ← تم تعريفه هنا فقط
+          const userId = interaction.user.id;
           const remaining = getRemainingAttempts(userId);
           await interaction.reply({
             embeds: [new EmbedBuilder()
@@ -186,7 +228,7 @@ client.on('interactionCreate', async interaction => {
           });
           break;
         case 'my_info':
-          const userId2 = interaction.user.id; // ← اسم مختلف لتجنب التكرار
+          const userId2 = interaction.user.id;
           const isCorrect = data.usersCorrect.includes(userId2);
           const isAwarded = data.usersAwarded.includes(userId2);
           const attempts = data.userAttempts[userId2]?.count || 0;
@@ -207,9 +249,9 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
-  // =======================
+  // ----------------------------
   // معالجة النماذج (Modals)
-  // =======================
+  // ----------------------------
   if (interaction.isModalSubmit()) {
     const { customId, fields } = interaction;
 
@@ -320,17 +362,14 @@ client.on('interactionCreate', async interaction => {
       await interaction.reply({ content: `✅ تم تعيين وقت المحاولة إلى ${time} ساعة (${formatTime(ms)})`, ephemeral: true });
     }
 
-    // ✅ NEW: معالجة نموذج إجابات الأعضاء (لا يحتاج لـ userId هنا لأنه لا يستخدمه)
     if (customId === 'user_answer_modal') {
-      // لا حاجة لفعل شيء هنا — لأن الإجابات تُسجل عبر الأزرار
-      // فقط نغلق النموذج
       await interaction.reply({ content: '✅ تم إرسال إجاباتك، سنقوم بمعالجتها...', ephemeral: true });
     }
   }
 
-  // =======================
+  // ----------------------------
   // معالجة أزرار الإجابة (Buttons)
-  // =======================
+  // ----------------------------
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('answer_')) {
       const questionId = parseInt(interaction.customId.split('_')[1]);
@@ -339,7 +378,7 @@ client.on('interactionCreate', async interaction => {
       const question = data.questions.find(q => q.id === questionId);
       if (!question) return interaction.reply({ content: '❌ السؤال غير موجود.', ephemeral: true });
 
-      const userId = interaction.user.id; // ← تم تعريفه هنا فقط
+      const userId = interaction.user.id;
 
       const remaining = getRemainingAttempts(userId);
       if (remaining <= 0) {
@@ -621,6 +660,8 @@ async function showCountEmbed(interaction, title, count, members) {
 // ----------------------------
 // تشغيل البوت
 // ----------------------------
+registerCommands(); // ← تسجيل الأوامر عند بدء التشغيل
+
 client.once('ready', () => {
   console.log(`✅ البوت متصل باسم: ${client.user.tag}`);
   console.log('⚙️ الأوامر المتاحة:');
