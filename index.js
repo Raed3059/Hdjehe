@@ -172,6 +172,8 @@ client.on('interactionCreate', async interaction => {
       const choice = values[0];
       switch (choice) {
         case 'add_questions_session':
+          // ⚠️ تأجيل التحديث لتمكين فتح النموذج
+          await interaction.deferUpdate();
           adminQuestionSession[interaction.user.id] = [];
           await showAddQuestionModal(interaction, true);
           break;
@@ -426,6 +428,18 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: '❌ إجابة خاطئة! حاول مرة أخرى.', ephemeral: true });
       }
     }
+
+    // ✅ NEW: معالجة زر "+ أضف سؤالًا ثانيًا"
+    if (interaction.customId === 'add_another_question') {
+      // تأجيل التحديث قبل فتح النموذج
+      await interaction.deferUpdate();
+      await showAddQuestionModal(interaction, false);
+    }
+
+    // ✅ NEW: معالجة زر "إرسال الإجابات" (إذا أضفته لاحقًا)
+    if (interaction.customId === 'submit_answers') {
+      await interaction.reply({ content: '✅ تم إرسال إجاباتك!', ephemeral: true });
+    }
   }
 });
 
@@ -505,6 +519,7 @@ async function showAddQuestionModal(interaction, isFirst) {
     new ActionRowBuilder().addComponents(correctInput)
   );
 
+  // ✅ الآن نفتح النموذج مباشرةً — لأننا استخدمنا deferUpdate() قبل ذلك
   await interaction.showModal(modal);
 }
 
