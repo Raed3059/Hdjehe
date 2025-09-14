@@ -1,15 +1,15 @@
 {
   "name": "discord-quiz-bot",
   "version": "1.0.0",
-  "description": "بوت أسئلة وأجوبة مع رتب تلقائية - جاهز للنشر على Railway",
+  "description": "بوت أسئلة مع رتب وتتبع الإجابات - جاهز لـ Railway",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
-  "keywords": ["discord", "bot", "quiz", "railway"],
-  "author": "Your Name",
-  "license": "MIT",
   "dependencies": {
     "discord.js": "^14.15.3"
-  }
+  },
+  "keywords": ["discord", "bot", "quiz", "role", "dropdown", "railway"],
+  "author": "Your Name",
+  "license": "MIT"
 }

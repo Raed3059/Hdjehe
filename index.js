@@ -1,627 +1,655 @@
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputStyle, TextInputBuilder } = require('discord.js');
+const { Client, IntentsBitField, EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const fs = require('fs');
-const path = require('path');
 
-// ======== التحميل ========
+// استلام التوكن من البيئة
 const TOKEN = process.env.DISCORD_TOKEN;
-const OWNER_ID = process.env.OWNER_ID || '1079022798523093032'; // ID المالك
-const DATA_FILE = path.join(__dirname, 'data.json');
+const OWNER_ID = process.env.OWNER_ID;
 
-// تحميل البيانات
-function loadData() {
-  if (!fs.existsSync(DATA_FILE)) {
-    const defaultData = {
-      questions: [],
-      role_id: null,
-      channel_id: null,
-      attempt_time_window: 86400, // 24h
-      correct_answers: {},
-      wrong_answers: {},
-      role_given: {},
-      attempts: {}
-    };
-    fs.writeFileSync(DATA_FILE, JSON.stringify(defaultData, null, 2));
-    return defaultData;
-  }
-  return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+if (!TOKEN) {
+  console.error('❌ لم يتم تحديد DISCORD_TOKEN في المتغيرات البيئية!');
+  process.exit(1);
 }
 
-// حفظ البيانات
-function saveData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-}
-
-// ======== إنشاء البوت ========
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates
+    IntentsBitField.Flags.Guilds,
+    IntentsBitField.Flags.GuildMembers,
+    IntentsBitField.Flags.GuildMessages,
+    IntentsBitField.Flags.MessageContent
   ]
 });
 
-// ======== تحميل البيانات عند بدء التشغيل ========
-let data = loadData();
+// تحميل قاعدة البيانات أو إنشاؤها
+let data = {};
+const DATA_FILE = './data.json';
 
-// ======== حدث بدء التشغيل ========
-client.once('ready', () => {
-  console.log(`✅ البوت متصل باسم: ${client.user.tag}`);
-  console.log(`👑 المالك: ${OWNER_ID}`);
-});
+function loadData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    } else {
+      data = {
+        questions: [],
+        allowedRole: null,
+        channelId: null,
+        attemptTimeWindow: 86400000,
+        usersCorrect: [],
+        usersIncorrect: [],
+        usersAwarded: [],
+        userAttempts: {}
+      };
+      saveData();
+    }
+  } catch (err) {
+    console.error('❌ خطأ في تحميل بيانات البيانات:', err);
+    data = {
+      questions: [],
+      allowedRole: null,
+      channelId: null,
+      attemptTimeWindow: 86400000,
+      usersCorrect: [],
+      usersIncorrect: [],
+      usersAwarded: [],
+      userAttempts: {}
+    };
+    saveData();
+  }
+}
 
-// ======== الأمر /setmenu للأعضاء — يعرض كل الأسئلة ===
+function saveData() {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  } catch (err) {
+    console.error('❌ خطأ في حفظ البيانات:', err);
+  }
+}
+
+loadData();
+
+// =============================
+// تخزين جلسة إضافة أسئلة للمالك
+// =============================
+const adminQuestionSession = {}; // { userId: [ {question, options, correct}, ... ] }
+
 client.on('interactionCreate', async interaction => {
-  if (!interaction.isCommand() && !interaction.isButton() && !interaction.isSelectMenu() && !interaction.isModalSubmit()) return;
+  if (!interaction.isCommand()) return;
 
-  // === أمر /setmenu ===
-  if (interaction.commandName === 'setmenu') {
-    data = loadData();
-    if (data.questions.length === 0) {
-      return interaction.reply({ content: '❌ لا توجد أسئلة بعد! يرجى طلب من المالك إضافة أسئلة.', ephemeral: true });
-    }
+  const { commandName, options, user } = interaction;
 
-    const embed = new EmbedBuilder()
-      .setTitle('🧠 اختبر نفسك! - جميع الأسئلة')
-      .setDescription('اختر إجابتك لكل سؤال. فقط إذا أجبت على **كل الأسئلة بشكل صحيح**، ستحصل على الرتبة!')
-      .setColor('Purple');
-
-    let questionIndex = 0;
-    const rows = [];
-
-    data.questions.forEach(q => {
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setLabel('أ')
-          .setCustomId(`answer_${questionIndex}_a`)
-          .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-          .setLabel('ب')
-          .setCustomId(`answer_${questionIndex}_b`)
-          .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-          .setLabel('ج')
-          .setCustomId(`answer_${questionIndex}_c`)
-          .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-          .setLabel('د')
-          .setCustomId(`answer_${questionIndex}_d`)
-          .setStyle(ButtonStyle.Secondary)
-      );
-
-      // نضيف وصف السؤال في الإيمبيد
-      embed.addFields({
-        name: `❓ السؤال ${questionIndex + 1}:`,
-        value: `**${q.question}**\n\nأ) ${q.options[0]}\nb) ${q.options[1]}\nc) ${q.options[2]}\nd) ${q.options[3]}`,
-        inline: false
-      });
-
-      rows.push(row);
-      questionIndex++;
-    });
-
-    await interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
+  if (user.id !== OWNER_ID && commandName === 'menu') {
+    return interaction.reply({ content: '❌ هذا الأمر مخصص للمالك فقط!', ephemeral: true });
   }
 
-  // === استجابة الزر (إجابة على سؤال) ===
-  if (interaction.isButton() && interaction.customId.startsWith('answer_')) {
-    const parts = interaction.customId.split('_');
-    const qIndex = parseInt(parts[1]);
-    const selectedOption = parts[2];
-
-    data = loadData();
-    const question = data.questions[qIndex];
-    if (!question) {
-      return interaction.editReply({ content: '❌ هذا السؤال غير موجود!', ephemeral: true });
-    }
-
-    const userKey = interaction.user.id.toString();
-    const isCorrect = selectedOption === question.answer;
-
-    // تحديث إحصائيات المستخدم
-    if (isCorrect) {
-      data.correct_answers[userKey] = (data.correct_answers[userKey] || 0) + 1;
-    } else {
-      data.wrong_answers[userKey] = (data.wrong_answers[userKey] || 0) + 1;
-    }
-
-    // تعديل الزر الذي ضغط عليه ليصبح "محدد"
-    const button = interaction.component;
-    button.setStyle(isCorrect ? ButtonStyle.Success : ButtonStyle.Danger);
-
-    // إعادة تكوين الصفوف بعد التحديث
-    const updatedRows = [];
-    for (let i = 0; i < data.questions.length; i++) {
-      const row = new ActionRowBuilder();
-      ['a', 'b', 'c', 'd'].forEach(opt => {
-        const customId = `answer_${i}_${opt}`;
-        const label = opt.toUpperCase();
-        const style = data.attempts[userKey]?.[i] === opt 
-          ? (data.questions[i].answer === opt ? ButtonStyle.Success : ButtonStyle.Danger)
-          : ButtonStyle.Secondary;
-
-        row.addComponents(
-          new ButtonBuilder()
-            .setLabel(label)
-            .setCustomId(customId)
-            .setStyle(style)
-            .setDisabled(data.attempts[userKey]?.[i] !== undefined)
-        );
-      });
-      updatedRows.push(row);
-    }
-
-    // حفظ الإجابة في بيانات المستخدم
-    if (!data.attempts[userKey]) data.attempts[userKey] = {};
-    data.attempts[userKey][qIndex] = selectedOption;
-    saveData(data);
-
-    // التحقق: هل أجاب على جميع الأسئلة؟
-    const totalQuestions = data.questions.length;
-    const answeredCount = Object.keys(data.attempts[userKey] || {}).length;
-
-    if (answeredCount === totalQuestions) {
-      // تحقق من عدد الإجابات الصحيحة
-      const correctCount = Object.keys(data.correct_answers).filter(id => id === userKey)[0]
-        ? data.correct_answers[userKey] || 0
-        : 0;
-
-      // هل أجاب على كل الأسئلة بشكل صحيح؟
-      if (correctCount >= totalQuestions) {
-        const roleId = data.role_id;
-        if (roleId) {
-          try {
-            const member = await interaction.guild.members.fetch(userKey);
-            await member.roles.add(roleId);
-            data.role_given[userKey] = true;
-            saveData(data);
-
-            embed.setTitle('🎉 مبروك! لقد أجبت على جميع الأسئلة بشكل صحيح!');
-            embed.setDescription('✅ تم منحك الرتبة بنجاح!');
-            embed.setColor('Gold');
-            await interaction.editReply({ embeds: [embed], components: updatedRows });
-            
-            // إرسال تنبيه في قناة الوك إن وجدت
-            if (data.channel_id) {
-              const logChannel = client.channels.cache.get(data.channel_id);
-              if (logChannel) {
-                logChannel.send({
-                  embeds: [
-                    new EmbedBuilder()
-                      .setTitle('🎖️ رتبة منوحة')
-                      .setDescription(`<@${userKey}> حصل على الرتبة <@&${roleId}> بعد الإجابة الصحيحة على جميع الأسئلة.`)
-                      .setColor('Gold')
-                      .setTimestamp()
-                  ]
-                });
-              }
-            }
-          } catch (e) {
-            await interaction.editReply({
-              content: '❌ لم أستطع منحك الرتبة — تأكد أن البوت لديه صلاحية "Manage Roles"',
-              embeds: [embed],
-              components: updatedRows
-            });
-          }
-        } else {
-          embed.setTitle('🎉 مبروك! أجبت على جميع الأسئلة بشكل صحيح!');
-          embed.setDescription('⚠️ لكن لم يتم تعيين رتبة بعد! اطلب من المالك تعيين رتبة.');
-          embed.setColor('Green');
-          await interaction.editReply({ embeds: [embed], components: updatedRows });
-        }
-      } else {
-        embed.setTitle('❌ لم تنجح! لديك إجابات خاطئة.');
-        embed.setDescription('للحصول على الرتبة، يجب أن تجيب على **جميع** الأسئلة بشكل صحيح.');
-        embed.setColor('Red');
-        await interaction.editReply({ embeds: [embed], components: updatedRows });
-      }
-    } else {
-      // لا يزال هناك أسئلة لم تُجب عنها
-      await interaction.editReply({ embeds: [embed], components: updatedRows });
-    }
-  }
-
-  // === الأمر /menu للمالك (لم يتغير) ===
-  if (interaction.commandName === 'menu') {
-    if (interaction.user.id !== OWNER_ID) {
-      return interaction.reply({ content: '❌ هذا الأمر للمالك فقط!', ephemeral: true });
-    }
-
-    const embed = new EmbedBuilder()
-      .setTitle('✨ مرحبًا يا أفضل مالك! ❤️')
-      .setDescription('نورتني يا نجمة السيرفر! 🌟\nاختر ما تريد من القائمة أدناه:')
-      .setColor('#FFD700');
-
-    const select = new ActionRowBuilder().addComponents(
-      new SelectMenuBuilder()
+  // =======================
+  // أمر /menu للمالك
+  // =======================
+  if (commandName === 'menu') {
+    const row = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
         .setCustomId('admin_menu')
-        .setPlaceholder('اختر إجراء...')
-        .addOptions(
-          { label: '1. إضافة سؤال', value: 'add_question' },
-          { label: '2. حذف جميع الأسئلة', value: 'delete_questions' },
-          { label: '3. عرض الأسئلة', value: 'show_questions' },
-          { label: '4. إضافة رتبة', value: 'set_role' },
-          { label: '5. إزالة الرتبة', value: 'remove_role' },
-          { label: '6. عدد الذين أجابت صح', value: 'stats_correct' },
-          { label: '7. عدد الذين أجابت خطأ', value: 'stats_wrong' },
-          { label: '8. عدد من حصلوا على الرتبة', value: 'stats_gave_role' },
-          { label: '9. تعيين قناة الوك', value: 'set_channel' },
-          { label: '10. تعيين وقت المحاولة', value: 'set_attempt_time' }
-        )
+        .setPlaceholder('اختر إجراءً...')
+        .addOptions([
+          { label: 'إضافة أسئلة (جلسة)', value: 'add_questions_session', description: 'أضف عدة أسئلة في جلسة واحدة' },
+          { label: 'حذف جميع الأسئلة', value: 'delete_questions', description: 'احذف كل الأسئلة نهائيًا' },
+          { label: 'عرض الأسئلة', value: 'show_questions', description: 'اعرض جميع الأسئلة والإجابات' },
+          { label: 'تعيين رتبة الفوز', value: 'set_role', description: 'حدد الرتبة التي تُمنح عند الإجابة الصحيحة' },
+          { label: 'إزالة رتبة الفوز', value: 'remove_role', description: 'احذف الرتبة المخصصة' },
+          { label: 'عدد الإجابات الصحيحة', value: 'count_correct', description: 'عرض عدد الأعضاء الذين أجابوا صح' },
+          { label: 'عدد الإجابات الخاطئة', value: 'count_incorrect', description: 'عرض عدد الأعضاء الذين أخطأوا' },
+          { label: 'عدد من حصلوا على الرتبة', value: 'count_awarded', description: 'كم شخص حصل على الرتبة؟' },
+          { label: 'تعيين قناة التقارير', value: 'set_channel', description: 'اختر قناة لإرسال التقارير' },
+          { label: 'تعيين وقت المحاولة', value: 'set_attempt_time', description: 'حدد متى يُسمح بالمحاولة مرة أخرى' }
+        ])
     );
 
-    await interaction.reply({ embeds: [embed], components: [select], ephemeral: true });
+    await interaction.reply({ content: '✅ مرحبًا يا أفضل مالك! نورتني ❤️', components: [row], ephemeral: true });
   }
 
-  // === استجابة قائمة المالك ===
-  if (interaction.isSelectMenu() && interaction.customId === 'admin_menu') {
-    const choice = interaction.values[0];
-    await interaction.deferUpdate();
+  // =======================
+  // أمر /setmenu للأعضاء
+  // =======================
+  if (commandName === 'setmenu') {
+    const row = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId('user_menu')
+        .setPlaceholder('اختر إجراءً...')
+        .addOptions([
+          { label: 'عرض الأسئلة للإجابة', value: 'show_questions_for_user', description: 'شاهد الأسئلة واختر إجاباتك' },
+          { label: 'من أجابوا صح؟', value: 'show_correct_users', description: 'عرض قائمة من أجابوا صح' },
+          { label: 'محاولاتك المتبقية', value: 'check_attempts', description: 'كم محاولة لديك؟' },
+          { label: 'معلوماتي', value: 'my_info', description: 'عرض معلوماتك الشخصية' }
+        ])
+    );
 
-    if (choice === 'add_question') {
-      await openAddQuestionModal(interaction);
-    } else if (choice === 'delete_questions') {
-      await confirmDeleteQuestions(interaction);
-    } else if (choice === 'show_questions') {
-      await showAllQuestions(interaction);
-    } else if (choice === 'set_role') {
-      await setRolePrompt(interaction);
-    } else if (choice === 'remove_role') {
-      await removeRole(interaction);
-    } else if (choice === 'stats_correct') {
-      await statsCorrect(interaction);
-    } else if (choice === 'stats_wrong') {
-      await statsWrong(interaction);
-    } else if (choice === 'stats_gave_role') {
-      await statsGaveRole(interaction);
-    } else if (choice === 'set_channel') {
-      await setChannelPrompt(interaction);
-    } else if (choice === 'set_attempt_time') {
-      await setAttemptTimePrompt(interaction);
+    await interaction.reply({ content: 'مرحبًا بك في لعبة الأسئلة! 🎯 جاوب واحصل على الرتبة تلقائيًا', components: [row], ephemeral: true });
+  }
+
+  // =======================
+  // معالجة القوائم المنبثقة (Dropdowns)
+  // =======================
+  if (interaction.isStringSelectMenu()) {
+    const { customId, values } = interaction;
+
+    if (customId === 'admin_menu') {
+      const choice = values[0];
+      switch (choice) {
+        case 'add_questions_session':
+          // ابدأ جلسة جديدة
+          adminQuestionSession[user.id] = [];
+          await showAddQuestionModal(interaction, true); // true = بداية جلسة
+          break;
+        case 'delete_questions':
+          await interaction.showModal(deleteQuestionsModal());
+          break;
+        case 'show_questions':
+          await showAllQuestions(interaction);
+          break;
+        case 'set_role':
+          await interaction.showModal(setRoleModal());
+          break;
+        case 'remove_role':
+          data.allowedRole = null;
+          saveData();
+          await interaction.reply({ content: '✅ تم إزالة رتبة الفوز.', ephemeral: true });
+          break;
+        case 'count_correct':
+          await showCountEmbed(interaction, 'عدد الأعضاء الذين أجابوا بشكل صحيح:', data.usersCorrect.length, data.usersCorrect.map(id => `<@${id}>`).join(', ') || 'لا أحد');
+          break;
+        case 'count_incorrect':
+          await showCountEmbed(interaction, 'عدد الأعضاء الذين أجابوا خطأ:', data.usersIncorrect.length, data.usersIncorrect.map(id => `<@${id}>`).join(', ') || 'لا أحد');
+          break;
+        case 'count_awarded':
+          await showCountEmbed(interaction, 'عدد الأعضاء الذين حصلوا على الرتبة:', data.usersAwarded.length, data.usersAwarded.map(id => `<@${id}>`).join(', ') || 'لا أحد');
+          break;
+        case 'set_channel':
+          await interaction.showModal(setChannelModal());
+          break;
+        case 'set_attempt_time':
+          await interaction.showModal(setAttemptTimeModal());
+          break;
+      }
+    }
+
+    if (customId === 'user_menu') {
+      const choice = values[0];
+      switch (choice) {
+        case 'show_questions_for_user':
+          await showQuestionsForUserModal(interaction);
+          break;
+        case 'show_correct_users':
+          await showCountEmbed(interaction, 'من أجابوا بشكل صحيح:', data.usersCorrect.length, data.usersCorrect.map(id => `<@${id}>`).join(', ') || 'لا أحد');
+          break;
+        case 'check_attempts':
+          const userId = interaction.user.id;
+          const remaining = getRemainingAttempts(userId);
+          await interaction.reply({
+            embeds: [new EmbedBuilder()
+              .setTitle('⏳ محاولاتك المتبقية')
+              .setDescription(`عدد المحاولات المتبقية: **${remaining}**\nوقت إعادة المحاولة: ${formatTime(data.attemptTimeWindow)} بعد آخر محاولة`)
+              .setColor('#FFD700')],
+            ephemeral: true
+          });
+          break;
+        case 'my_info':
+          const userId = interaction.user.id;
+          const isCorrect = data.usersCorrect.includes(userId);
+          const isAwarded = data.usersAwarded.includes(userId);
+          const attempts = data.userAttempts[userId]?.count || 0;
+          await interaction.reply({
+            embeds: [new EmbedBuilder()
+              .setTitle('👤 معلوماتك')
+              .addFields(
+                { name: 'معرفك', value: `<@${userId}>`, inline: true },
+                { name: 'إجابات صحيحة', value: isCorrect ? '✅ نعم' : '❌ لا', inline: true },
+                { name: 'حصلت على الرتبة', value: isAwarded ? '🏆 نعم' : '❌ لا', inline: true },
+                { name: 'عدد المحاولات', value: `${attempts}`, inline: true }
+              )
+              .setColor('#5DADE2')]
+            , ephemeral: true
+          });
+          break;
+      }
     }
   }
 
-  // === إضافة سؤال (نموذج) ===
-  if (interaction.isModalSubmit() && interaction.customId === 'add_question_modal') {
-    const q = interaction.fields.getTextInputValue('question');
-    const opt1 = interaction.fields.getTextInputValue('option_a');
-    const opt2 = interaction.fields.getTextInputValue('option_b');
-    const opt3 = interaction.fields.getTextInputValue('option_c');
-    const opt4 = interaction.fields.getTextInputValue('option_d');
-    const ans = interaction.fields.getTextInputValue('answer').toLowerCase();
+  // =======================
+  // معالجة نماذج إضافة الأسئلة (المالك)
+  // =======================
+  if (interaction.isModalSubmit()) {
+    const { customId, fields } = interaction;
 
-    if (!['a', 'b', 'c', 'd'].includes(ans)) {
-      return interaction.editReply({ content: '❌ الإجابة يجب أن تكون a, b, c أو d!', ephemeral: true });
+    if (customId === 'add_question_modal') {
+      const question = fields.getTextInputValue('question');
+      const optA = fields.getTextInputValue('opt_a');
+      const optB = fields.getTextInputValue('opt_b');
+      const optC = fields.getTextInputValue('opt_c');
+      const optD = fields.getTextInputValue('opt_d');
+      const correct = fields.getTextInputValue('correct');
+
+      const options = [optA, optB, optC, optD];
+      const correctIndex = ['A', 'B', 'C', 'D'].indexOf(correct.toUpperCase());
+
+      if (correctIndex === -1) {
+        return interaction.reply({ content: '❌ الإجابة الصحيحة يجب أن تكون A, B, C أو D', ephemeral: true });
+      }
+
+      // إضافة السؤال إلى جلسة المالك
+      if (!adminQuestionSession[interaction.user.id]) {
+        adminQuestionSession[interaction.user.id] = [];
+      }
+
+      adminQuestionSession[interaction.user.id].push({
+        question,
+        options,
+        correct: correctIndex
+      });
+
+      // إظهار رسالة مع زر "أضف سؤالًا آخر" و"حفظ الأسئلة"
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('add_another_question')
+          .setLabel('+ أضف سؤالًا ثانيًا')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('save_all_questions')
+          .setLabel('💾 حفظ الأسئلة')
+          .setStyle(ButtonStyle.Success)
+      );
+
+      await interaction.reply({
+        content: `✅ تم حفظ السؤال:\n**${question}**`,
+        components: [row],
+        ephemeral: true
+      });
     }
 
-    data = loadData();
-    data.questions.push({
-      question: q,
-      options: [opt1, opt2, opt3, opt4],
-      answer: ans
-    });
-    saveData(data);
+    if (customId === 'save_all_questions') {
+      // حفظ جميع الأسئلة في الجلسة
+      const session = adminQuestionSession[interaction.user.id];
+      if (!session || session.length === 0) {
+        return interaction.reply({ content: '❌ لا توجد أسئلة للحفظ.', ephemeral: true });
+      }
 
-    const button = new ButtonBuilder()
-      .setLabel('➕ إضافة سؤال آخر')
-      .setCustomId('add_another_question')
-      .setStyle(ButtonStyle.Primary);
+      data.questions.push(...session);
+      delete adminQuestionSession[interaction.user.id]; // مسح الجلسة
+      saveData();
 
-    const row = new ActionRowBuilder().addComponents(button);
+      await interaction.reply({
+        content: `🎉 تم حفظ ${session.length} أسئلة بنجاح!`,
+        ephemeral: true
+      });
+    }
 
-    await interaction.editReply({
-      content: `✅ تم حفظ السؤال:\n**${q}**\nأ) ${opt1}\nب) ${opt2}\nج) ${opt3}\nد) ${opt4}\n✅ الإجابة: ${ans.toUpperCase()}`,
-      components: [row]
-    });
+    if (customId === 'add_another_question') {
+      // إعادة فتح نموذج إضافة سؤال جديد
+      await showAddQuestionModal(interaction, false); // false = ليس أول سؤال
+    }
+
+    if (customId === 'delete_questions_confirm') {
+      const confirm = fields.getTextInputValue('confirm');
+      if (confirm.toLowerCase() !== 'نعم') {
+        return interaction.reply({ content: '❌ تم إلغاء الحذف.', ephemeral: true });
+      }
+      data.questions = [];
+      saveData();
+      await interaction.reply({ content: '🗑️ تم حذف جميع الأسئلة بنجاح!', ephemeral: true });
+    }
+
+    if (customId === 'set_role_modal') {
+      const roleId = fields.getTextInputValue('role_id');
+      if (!/^\d+$/.test(roleId)) {
+        return interaction.reply({ content: '❌ الرتبة يجب أن تكون رقمًا صالحًا (ID)', ephemeral: true });
+      }
+      data.allowedRole = roleId;
+      saveData();
+      await interaction.reply({ content: `✅ تم تعيين رتبة الفوز إلى <@&${roleId}>`, ephemeral: true });
+    }
+
+    if (customId === 'set_channel_modal') {
+      const channelId = fields.getTextInputValue('channel_id');
+      if (!/^\d+$/.test(channelId)) {
+        return interaction.reply({ content: '❌ معرف القناة يجب أن يكون رقمًا', ephemeral: true });
+      }
+      data.channelId = channelId;
+      saveData();
+      await interaction.reply({ content: `✅ تم تعيين قناة التقارير إلى <#${channelId}>`, ephemeral: true });
+    }
+
+    if (customId === 'set_attempt_time_modal') {
+      const time = fields.getTextInputValue('time');
+      let ms;
+      switch (time) {
+        case '24': ms = 86400000; break;
+        case '48': ms = 172800000; break;
+        case '72': ms = 259200000; break;
+        default: return interaction.reply({ content: '❌ الخيار غير صالح. اختر 24 أو 48 أو 72 ساعة.', ephemeral: true });
+      }
+      data.attemptTimeWindow = ms;
+      saveData();
+      await interaction.reply({ content: `✅ تم تعيين وقت المحاولة إلى ${time} ساعة (${formatTime(ms)})`, ephemeral: true });
+    }
   }
 
-  if (interaction.isButton() && interaction.customId === 'add_another_question') {
-    await openAddQuestionModal(interaction);
-  }
+  // =======================
+  // معالجة أزرار الإجابة (الأعضاء)
+  // =======================
+  if (interaction.isButton()) {
+    if (interaction.customId.startsWith('answer_')) {
+      const questionId = parseInt(interaction.customId.split('_')[1]);
+      const selectedOption = parseInt(interaction.customId.split('_')[2]);
 
-  if (interaction.isButton() && interaction.customId === 'confirm_delete') {
-    data = loadData();
-    data.questions = [];
-    saveData(data);
-    await interaction.editReply({ content: '🗑️ تم حذف جميع الأسئلة بنجاح!', ephemeral: true });
-  }
+      const question = data.questions.find(q => q.id === questionId);
+      if (!question) return interaction.reply({ content: '❌ السؤال غير موجود.', ephemeral: true });
 
-  if (interaction.isButton() && interaction.customId === 'cancel_delete') {
-    await interaction.editReply({ content: '✅ تم إلغاء الحذف.', ephemeral: true });
-  }
+      const userId = interaction.user.id;
 
-  if (interaction.isModalSubmit() && interaction.customId === 'set_role_modal') {
-    const roleId = interaction.fields.getTextInputValue('role_id');
-    data = loadData();
-    data.role_id = roleId;
-    saveData(data);
-    await interaction.editReply({ content: `✅ تم تعيين الرتبة إلى: <@&${roleId}>`, ephemeral: true });
-  }
+      const remaining = getRemainingAttempts(userId);
+      if (remaining <= 0) {
+        return interaction.reply({ content: '❌ لقد استنفذت محاولاتك. انتظر حتى ينتهي الوقت.', ephemeral: true });
+      }
 
-  if (interaction.isModalSubmit() && interaction.customId === 'set_channel_modal') {
-    const channelId = interaction.fields.getTextInputValue('channel_id');
-    data = loadData();
-    data.channel_id = channelId;
-    saveData(data);
-    await interaction.editReply({ content: `✅ تم تعيين قناة الوك إلى: <#${channelId}>`, ephemeral: true });
-  }
+      if (!data.userAttempts[userId]) {
+        data.userAttempts[userId] = { count: 0, lastUsed: Date.now() };
+      }
+      data.userAttempts[userId].count++;
+      data.userAttempts[userId].lastUsed = Date.now();
 
-  if (interaction.isModalSubmit() && interaction.customId === 'set_attempt_time_modal') {
-    const timeValue = interaction.fields.getTextInputValue('time_value');
-    data = loadData();
-    data.attempt_time_window = parseInt(timeValue);
-    saveData(data);
-    await interaction.editReply({
-      content: `✅ تم تعيين وقت المحاولة إلى: ${timeValue} ثانية (${Math.floor(parseInt(timeValue)/3600)} ساعة)`,
-      ephemeral: true
-    });
-  }
+      saveData();
 
-  // === الأوامر الأخرى (لم تتغير) ===
-  if (interaction.commandName === 'setmenu') return; // تم التعامل مسبقًا
-  if (interaction.isButton() && interaction.customId.startsWith('answer_')) return; // تم التعامل مسبقًا
+      if (selectedOption === question.correct) {
+        if (!data.usersCorrect.includes(userId)) {
+          data.usersCorrect.push(userId);
+        }
 
-  // === /stats ===
-  if (interaction.commandName === 'stats') {
-    data = loadData();
-    const total = data.questions.length;
-    const correctUsers = Object.keys(data.correct_answers).filter(id => data.correct_answers[id] >= total).length;
-    const wrongUsers = Object.keys(data.wrong_answers).length;
-    const gaveRole = Object.keys(data.role_given).length;
-
-    const embed = new EmbedBuilder()
-      .setTitle('📊 إحصائيات الاختبار')
-      .addFields(
-        { name: 'عدد الأسئلة', value: `${total}`, inline: true },
-        { name: 'من أجابوا صح على الكل', value: `${correctUsers}`, inline: true },
-        { name: 'من أجابوا خطأ على الأقل', value: `${wrongUsers}`, inline: true },
-        { name: 'من حصلوا على الرتبة', value: `${gaveRole}`, inline: true }
-      )
-      .setColor('Blue');
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+        if (data.usersCorrect.length === data.questions.length) {
+          if (data.allowedRole) {
+            const member = await interaction.guild.members.fetch(userId);
+            if (member) {
+              await member.roles.add(data.allowedRole);
+              if (!data.usersAwarded.includes(userId)) {
+                data.usersAwarded.push(userId);
+              }
+              saveData();
+              await interaction.reply({
+                content: `🎉 مبروك! أجبت على جميع الأسئلة بشكل صحيح وحصلت على الرتبة <@&${data.allowedRole}>!`,
+                ephemeral: true
+              });
+            }
+          } else {
+            await interaction.reply({ content: '🎉 أجبت بشكل صحيح! لكن لم تُضبط رتبة للمنح.', ephemeral: true });
+          }
+        } else {
+          await interaction.reply({ content: '✅ إجابة صحيحة! لا تنسَ الإجابة على باقي الأسئلة.', ephemeral: true });
+        }
+      } else {
+        if (!data.usersIncorrect.includes(userId)) {
+          data.usersIncorrect.push(userId);
+        }
+        saveData();
+        await interaction.reply({ content: '❌ إجابة خاطئة! حاول مرة أخرى.', ephemeral: true });
+      }
+    }
   }
 });
 
-// ======== وظائف المساعدة (لم تتغير) ========
-async function openAddQuestionModal(interaction) {
+// ----------------------------
+// الدوال المساعدة
+// ----------------------------
+
+function getRemainingAttempts(userId) {
+  const attempt = data.userAttempts[userId];
+  if (!attempt) return 1;
+
+  const elapsed = Date.now() - attempt.lastUsed;
+  if (elapsed >= data.attemptTimeWindow) {
+    return 1;
+  }
+  return 0;
+}
+
+function formatTime(ms) {
+  const hours = Math.floor(ms / 3600000);
+  return `${hours} ساعة`;
+}
+
+async function showAddQuestionModal(interaction, isFirst) {
   const modal = new ModalBuilder()
     .setCustomId('add_question_modal')
-    .setTitle('➕ إضافة سؤال جديد');
+    .setTitle(isFirst ? '📝 أضف أول سؤال' : '➕ أضف سؤالًا جديدًا');
+
+  const questionInput = new TextInputBuilder()
+    .setCustomId('question')
+    .setLabel('السؤال')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('اكتب سؤالك هنا...')
+    .setRequired(true);
+
+  const optA = new TextInputBuilder()
+    .setCustomId('opt_a')
+    .setLabel('الخيار A')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('اكتب الخيار الأول')
+    .setRequired(true);
+
+  const optB = new TextInputBuilder()
+    .setCustomId('opt_b')
+    .setLabel('الخيار B')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('اكتب الخيار الثاني')
+    .setRequired(true);
+
+  const optC = new TextInputBuilder()
+    .setCustomId('opt_c')
+    .setLabel('الخيار C')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('اكتب الخيار الثالث')
+    .setRequired(true);
+
+  const optD = new TextInputBuilder()
+    .setCustomId('opt_d')
+    .setLabel('الخيار D')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('اكتب الخيار الرابع')
+    .setRequired(true);
+
+  const correctInput = new TextInputBuilder()
+    .setCustomId('correct')
+    .setLabel('الإجابة الصحيحة (A/B/C/D)')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('اكتب A أو B أو C أو D')
+    .setRequired(true);
 
   modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('question')
-        .setLabel('السؤال')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('اكتب السؤال هنا...')
-        .setRequired(true)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('option_a')
-        .setLabel('الخيار أ')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('مثال: القاهرة')
-        .setRequired(true)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('option_b')
-        .setLabel('الخيار ب')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('مثال: الرياض')
-        .setRequired(true)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('option_c')
-        .setLabel('الخيار ج')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('مثال: دبي')
-        .setRequired(true)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('option_d')
-        .setLabel('الخيار د')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('مثال: بيروت')
-        .setRequired(true)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('answer')
-        .setLabel('الإجابة الصحيحة (a/b/c/d)')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('اكتب a أو b أو c أو d')
-        .setRequired(true)
-    )
+    new ActionRowBuilder().addComponents(questionInput),
+    new ActionRowBuilder().addComponents(optA),
+    new ActionRowBuilder().addComponents(optB),
+    new ActionRowBuilder().addComponents(optC),
+    new ActionRowBuilder().addComponents(optD),
+    new ActionRowBuilder().addComponents(correctInput)
   );
 
   await interaction.showModal(modal);
 }
 
-async function confirmDeleteQuestions(interaction) {
-  const embed = new EmbedBuilder()
-    .setTitle('⚠️ تحذير!')
-    .setDescription(`هل أنت متأكد أنك تريد حذف **${loadData().questions.length}** سؤالًا؟ هذا الإجراء **غير قابل للعكس**!`)
-    .setColor('Red');
+function deleteQuestionsModal() {
+  const modal = new ModalBuilder()
+    .setCustomId('delete_questions_confirm')
+    .setTitle('تأكيد حذف الأسئلة');
 
-  const row = new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder()
-        .setCustomId('confirm_delete')
-        .setLabel('نعم، احذفها')
-        .setStyle(ButtonStyle.Danger),
-      new ButtonBuilder()
-        .setCustomId('cancel_delete')
-        .setLabel('لا، ألغِ')
-        .setStyle(ButtonStyle.Secondary)
-    );
+  const input = new TextInputBuilder()
+    .setCustomId('confirm')
+    .setLabel('اكتب "نعم" للتأكيد')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('اكتب نعم فقط')
+    .setRequired(true);
 
-  await interaction.editReply({ embeds: [embed], components: [row] });
+  modal.addComponents(new ActionRowBuilder().addComponents(input));
+  return modal;
+}
+
+function setRoleModal() {
+  const modal = new ModalBuilder()
+    .setCustomId('set_role_modal')
+    .setTitle('تعيين رتبة الفوز');
+
+  const input = new TextInputBuilder()
+    .setCustomId('role_id')
+    .setLabel('معرف الرتبة (ID)')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('مثال: 123456789012345678')
+    .setRequired(true);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(input));
+  return modal;
+}
+
+function setChannelModal() {
+  const modal = new ModalBuilder()
+    .setCustomId('set_channel_modal')
+    .setTitle('تعيين قناة التقارير');
+
+  const input = new TextInputBuilder()
+    .setCustomId('channel_id')
+    .setLabel('معرف القناة (ID)')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('مثال: 123456789012345678')
+    .setRequired(true);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(input));
+  return modal;
+}
+
+function setAttemptTimeModal() {
+  const modal = new ModalBuilder()
+    .setCustomId('set_attempt_time_modal')
+    .setTitle('تعيين وقت المحاولة');
+
+  const input = new TextInputBuilder()
+    .setCustomId('time')
+    .setLabel('عدد الساعات (24 / 48 / 72)')
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder('24 أو 48 أو 72')
+    .setRequired(true);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(input));
+  return modal;
 }
 
 async function showAllQuestions(interaction) {
-  data = loadData();
   if (data.questions.length === 0) {
-    return interaction.editReply({ content: '❌ لا توجد أسئلة!', ephemeral: true });
+    return interaction.reply({ content: '❌ لا توجد أسئلة حاليًا.', ephemeral: true });
   }
 
   const embed = new EmbedBuilder()
-    .setTitle('📚 جميع الأسئلة')
-    .setDescription('قائمة الأسئلة مع الإجابات الصحيحة:')
-    .setColor('Blue');
+    .setTitle('📚 جميع الأسئلة والإجابات')
+    .setColor('#2ECC71');
 
-  data.questions.forEach((q, i) => {
-    const opts = ['أ', 'ب', 'ج', 'د'];
-    const optionsStr = opts.map((letter, idx) => `${letter}) ${q.options[idx]}`).join('\n');
-    const correct = opts[opts.indexOf(q.answer.toUpperCase())];
+  data.questions.forEach(q => {
+    const correctOpt = ['A', 'B', 'C', 'D'][q.correct];
     embed.addFields({
-      name: `السؤال ${i + 1}: ${q.question}`,
-      value: `${optionsStr}\n\n✅ الإجابة الصحيحة: **${correct}**`,
+      name: `🔹 ${q.question}`,
+      value: `**A)** ${q.options[0]}\n**B)** ${q.options[1]}\n**C)** ${q.options[2]}\n**D)** ${q.options[3]}\n\n✅ الإجابة الصحيحة: **${correctOpt}**`,
       inline: false
     });
   });
 
-  await interaction.editReply({ embeds: [embed], ephemeral: true });
+  await interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
-async function setRolePrompt(interaction) {
-  const modal = new ModalBuilder()
-    .setCustomId('set_role_modal')
-    .setTitle('🔖 تعيين رتبة الفائز');
-
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('role_id')
-        .setLabel('معرف الرتبة (مثال: 123456789012345678)')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('أدخل معرف الرتبة هنا...')
-        .setRequired(true)
-    )
-  );
-
-  await interaction.showModal(modal);
-}
-
-async function removeRole(interaction) {
-  data = loadData();
-  data.role_id = null;
-  saveData(data);
-  await interaction.editReply({ content: '✅ تم إزالة الرتبة المخصصة!', ephemeral: true });
-}
-
-async function statsCorrect(interaction) {
-  data = loadData();
-  const total = data.questions.length;
-  const correct = Object.keys(data.correct_answers).filter(id => data.correct_answers[id] >= total).length;
-  const users = Object.keys(data.correct_answers)
-    .filter(id => data.correct_answers[id] >= total)
-    .map(id => `<@${id}>`)
-    .join(', ') || 'لا أحد';
-
-  const embed = new EmbedBuilder()
-    .setTitle('🏆 من أجابوا على جميع الأسئلة بشكل صحيح؟')
-    .setDescription(`عدد الأشخاص: **${correct}**\n\n${users}`)
-    .setColor('Green');
-
-  await interaction.editReply({ embeds: [embed], ephemeral: true });
-}
-
-async function statsWrong(interaction) {
-  data = loadData();
-  const wrong = Object.keys(data.wrong_answers).length;
-  const users = Object.keys(data.wrong_answers).map(id => `<@${id}>`).join(', ') || 'لا أحد';
-
-  const embed = new EmbedBuilder()
-    .setTitle('❌ من أجابوا على بعض الأسئلة خطأ؟')
-    .setDescription(`عدد الأشخاص: **${wrong}**\n\n${users}`)
-    .setColor('Red');
-
-  await interaction.editReply({ embeds: [embed], ephemeral: true });
-}
-
-async function statsGaveRole(interaction) {
-  data = loadData();
-  const gave = Object.keys(data.role_given).length;
-  const users = Object.keys(data.role_given).map(id => `<@${id}>`).join(', ') || 'لا أحد';
-
-  const embed = new EmbedBuilder()
-    .setTitle('🎖️ من حصلوا على الرتبة؟')
-    .setDescription(`عدد الأشخاص: **${gave}**\n\n${users}`)
-    .setColor('Gold');
-
-  await interaction.editReply({ embeds: [embed], ephemeral: true });
-}
-
-async function setChannelPrompt(interaction) {
-  const modal = new ModalBuilder()
-    .setCustomId('set_channel_modal')
-    .setTitle('📡 تعيين قناة الوك');
-
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('channel_id')
-        .setLabel('معرف قناة الوك (مثال: 123456789012345678)')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('أدخل معرف القناة هنا...')
-        .setRequired(true)
-    )
-  );
-
-  await interaction.showModal(modal);
-}
-
-async function setAttemptTimePrompt(interaction) {
-  const modal = new ModalBuilder()
-    .setCustomId('set_attempt_time_modal')
-    .setTitle('⏱️ تعيين وقت المحاولة');
-
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('time_value')
-        .setLabel('عدد الثواني (مثال: 86400 = 24 ساعة)')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('86400 (24h), 172800 (48h), 259200 (72h)')
-        .setValue('86400')
-        .setRequired(true)
-    )
-  );
-
-  await interaction.showModal(modal);
-}
-
-// ======== تسجيل الأوامر ========
-client.on('ready', async () => {
-  const commands = [
-    {
-      name: 'menu',
-      description: 'قائمة إدارة البوت (المالك فقط)'
-    },
-    {
-      name: 'setmenu',
-      description: 'عرض جميع الأسئلة والإجابة عليها'
-    },
-    {
-      name: 'stats',
-      description: 'عرض إحصائيات الاختبار'
-    }
-  ];
-
-  try {
-    await client.application.commands.set(commands);
-    console.log('✅ تم تسجيل الأوامر!');
-  } catch (error) {
-    console.error('❌ خطأ في تسجيل الأوامر:', error);
+// ===============================
+// ✅ NEW: عرض الأسئلة للأعضاء في نموذج (Modal) مع أزرار
+// ===============================
+async function showQuestionsForUserModal(interaction) {
+  if (data.questions.length === 0) {
+    return interaction.reply({ content: '❌ لا توجد أسئلة حاليًا.', ephemeral: true });
   }
+
+  const modal = new ModalBuilder()
+    .setCustomId('user_answer_modal')
+    .setTitle('🎯 إجاباتك على الأسئلة');
+
+  // نضيف كل سؤال كحقل نصي (غير قابل للتعديل) + أزرار اختيار
+  let i = 0;
+  for (const q of data.questions) {
+    i++;
+    // نص السؤال (غير قابل للتعديل)
+    const questionField = new TextInputBuilder()
+      .setCustomId(`q_${i}_text`)
+      .setLabel(`السؤال ${i}:`)
+      .setValue(q.question)
+      .setStyle(TextInputStyle.Short)
+      .setDisabled(true);
+
+    // أزرار الخيارات (A/B/C/D)
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`answer_${q.id}_0`)
+        .setLabel('A')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`answer_${q.id}_1`)
+        .setLabel('B')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`answer_${q.id}_2`)
+        .setLabel('C')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`answer_${q.id}_3`)
+        .setLabel('D')
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(questionField),
+      row
+    );
+  }
+
+  // زر "إرسال الإجابات"
+  const submitButton = new ButtonBuilder()
+    .setCustomId('submit_answers')
+    .setLabel('✅ إرسال الإجابات')
+    .setStyle(ButtonStyle.Success);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(submitButton));
+
+  await interaction.showModal(modal);
+}
+
+// ===============================
+// ✅ NEW: معالجة نموذج الإجابات (الأعضاء)
+// ===============================
+if (interaction.isModalSubmit()) {
+  if (interaction.customId === 'user_answer_modal') {
+    // لن نستخدم الحقول هنا — لأننا نستخدم أزرارًا فقط
+    // هذه الوظيفة تُستخدم فقط لفتح النموذج — الإجابات تُسجل عبر الأزرار
+    // لا حاجة لمعالجة هنا
+  }
+}
+
+// ----------------------------
+// عرض الإجابات الصحيحة/الخاطئة
+// ----------------------------
+async function showCountEmbed(interaction, title, count, members) {
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setDescription(members)
+    .setColor('#FF9F43')
+    .addFields({ name: 'المجموع', value: `**${count}** شخص`, inline: true });
+
+  await interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+// ----------------------------
+// تشغيل البوت
+// ----------------------------
+client.once('ready', () => {
+  console.log(`✅ البوت متصل باسم: ${client.user.tag}`);
+  console.log('⚙️ الأوامر المتاحة:');
+  console.log('   /menu → للمالك فقط');
+  console.log('   /setmenu → للأعضاء');
+  console.log('💾 البيانات تُخزن في data.json (مؤقتة على Railway)');
 });
 
-// ======== تشغيل البوت ========
 client.login(TOKEN);
