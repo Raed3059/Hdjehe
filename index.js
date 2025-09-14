@@ -66,24 +66,20 @@ function saveData() {
 
 loadData();
 
-// =============================
 // تخزين جلسة إضافة أسئلة للمالك
-// =============================
-const adminQuestionSession = {}; // { userId: [ {question, options, correct}, ... ] }
+const adminQuestionSession = {};
 
 client.on('interactionCreate', async interaction => {
-  if (!interaction.isCommand()) return;
-
-  const { commandName, options, user } = interaction;
-
-  if (user.id !== OWNER_ID && commandName === 'menu') {
-    return interaction.reply({ content: '❌ هذا الأمر مخصص للمالك فقط!', ephemeral: true });
-  }
+  if (!interaction.isCommand() && !interaction.isStringSelectMenu() && !interaction.isModalSubmit() && !interaction.isButton()) return;
 
   // =======================
   // أمر /menu للمالك
   // =======================
-  if (commandName === 'menu') {
+  if (interaction.isCommand() && interaction.commandName === 'menu') {
+    if (interaction.user.id !== OWNER_ID) {
+      return interaction.reply({ content: '❌ هذا الأمر مخصص للمالك فقط!', ephemeral: true });
+    }
+
     const row = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('admin_menu')
@@ -108,7 +104,7 @@ client.on('interactionCreate', async interaction => {
   // =======================
   // أمر /setmenu للأعضاء
   // =======================
-  if (commandName === 'setmenu') {
+  if (interaction.isCommand() && interaction.commandName === 'setmenu') {
     const row = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('user_menu')
@@ -134,9 +130,8 @@ client.on('interactionCreate', async interaction => {
       const choice = values[0];
       switch (choice) {
         case 'add_questions_session':
-          // ابدأ جلسة جديدة
-          adminQuestionSession[user.id] = [];
-          await showAddQuestionModal(interaction, true); // true = بداية جلسة
+          adminQuestionSession[interaction.user.id] = [];
+          await showAddQuestionModal(interaction, true);
           break;
         case 'delete_questions':
           await interaction.showModal(deleteQuestionsModal());
@@ -180,7 +175,7 @@ client.on('interactionCreate', async interaction => {
           await showCountEmbed(interaction, 'من أجابوا بشكل صحيح:', data.usersCorrect.length, data.usersCorrect.map(id => `<@${id}>`).join(', ') || 'لا أحد');
           break;
         case 'check_attempts':
-          const userId = interaction.user.id;
+          const userId = interaction.user.id; // ← تم تعريفه هنا فقط
           const remaining = getRemainingAttempts(userId);
           await interaction.reply({
             embeds: [new EmbedBuilder()
@@ -191,15 +186,15 @@ client.on('interactionCreate', async interaction => {
           });
           break;
         case 'my_info':
-          const userId = interaction.user.id;
-          const isCorrect = data.usersCorrect.includes(userId);
-          const isAwarded = data.usersAwarded.includes(userId);
-          const attempts = data.userAttempts[userId]?.count || 0;
+          const userId2 = interaction.user.id; // ← اسم مختلف لتجنب التكرار
+          const isCorrect = data.usersCorrect.includes(userId2);
+          const isAwarded = data.usersAwarded.includes(userId2);
+          const attempts = data.userAttempts[userId2]?.count || 0;
           await interaction.reply({
             embeds: [new EmbedBuilder()
               .setTitle('👤 معلوماتك')
               .addFields(
-                { name: 'معرفك', value: `<@${userId}>`, inline: true },
+                { name: 'معرفك', value: `<@${userId2}>`, inline: true },
                 { name: 'إجابات صحيحة', value: isCorrect ? '✅ نعم' : '❌ لا', inline: true },
                 { name: 'حصلت على الرتبة', value: isAwarded ? '🏆 نعم' : '❌ لا', inline: true },
                 { name: 'عدد المحاولات', value: `${attempts}`, inline: true }
@@ -213,7 +208,7 @@ client.on('interactionCreate', async interaction => {
   }
 
   // =======================
-  // معالجة نماذج إضافة الأسئلة (المالك)
+  // معالجة النماذج (Modals)
   // =======================
   if (interaction.isModalSubmit()) {
     const { customId, fields } = interaction;
@@ -233,7 +228,6 @@ client.on('interactionCreate', async interaction => {
         return interaction.reply({ content: '❌ الإجابة الصحيحة يجب أن تكون A, B, C أو D', ephemeral: true });
       }
 
-      // إضافة السؤال إلى جلسة المالك
       if (!adminQuestionSession[interaction.user.id]) {
         adminQuestionSession[interaction.user.id] = [];
       }
@@ -244,7 +238,6 @@ client.on('interactionCreate', async interaction => {
         correct: correctIndex
       });
 
-      // إظهار رسالة مع زر "أضف سؤالًا آخر" و"حفظ الأسئلة"
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('add_another_question')
@@ -264,14 +257,13 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (customId === 'save_all_questions') {
-      // حفظ جميع الأسئلة في الجلسة
       const session = adminQuestionSession[interaction.user.id];
       if (!session || session.length === 0) {
         return interaction.reply({ content: '❌ لا توجد أسئلة للحفظ.', ephemeral: true });
       }
 
       data.questions.push(...session);
-      delete adminQuestionSession[interaction.user.id]; // مسح الجلسة
+      delete adminQuestionSession[interaction.user.id];
       saveData();
 
       await interaction.reply({
@@ -281,8 +273,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (customId === 'add_another_question') {
-      // إعادة فتح نموذج إضافة سؤال جديد
-      await showAddQuestionModal(interaction, false); // false = ليس أول سؤال
+      await showAddQuestionModal(interaction, false);
     }
 
     if (customId === 'delete_questions_confirm') {
@@ -328,10 +319,17 @@ client.on('interactionCreate', async interaction => {
       saveData();
       await interaction.reply({ content: `✅ تم تعيين وقت المحاولة إلى ${time} ساعة (${formatTime(ms)})`, ephemeral: true });
     }
+
+    // ✅ NEW: معالجة نموذج إجابات الأعضاء (لا يحتاج لـ userId هنا لأنه لا يستخدمه)
+    if (customId === 'user_answer_modal') {
+      // لا حاجة لفعل شيء هنا — لأن الإجابات تُسجل عبر الأزرار
+      // فقط نغلق النموذج
+      await interaction.reply({ content: '✅ تم إرسال إجاباتك، سنقوم بمعالجتها...', ephemeral: true });
+    }
   }
 
   // =======================
-  // معالجة أزرار الإجابة (الأعضاء)
+  // معالجة أزرار الإجابة (Buttons)
   // =======================
   if (interaction.isButton()) {
     if (interaction.customId.startsWith('answer_')) {
@@ -341,7 +339,7 @@ client.on('interactionCreate', async interaction => {
       const question = data.questions.find(q => q.id === questionId);
       if (!question) return interaction.reply({ content: '❌ السؤال غير موجود.', ephemeral: true });
 
-      const userId = interaction.user.id;
+      const userId = interaction.user.id; // ← تم تعريفه هنا فقط
 
       const remaining = getRemainingAttempts(userId);
       if (remaining <= 0) {
@@ -556,9 +554,6 @@ async function showAllQuestions(interaction) {
   await interaction.reply({ embeds: [embed], ephemeral: true });
 }
 
-// ===============================
-// ✅ NEW: عرض الأسئلة للأعضاء في نموذج (Modal) مع أزرار
-// ===============================
 async function showQuestionsForUserModal(interaction) {
   if (data.questions.length === 0) {
     return interaction.reply({ content: '❌ لا توجد أسئلة حاليًا.', ephemeral: true });
@@ -568,11 +563,9 @@ async function showQuestionsForUserModal(interaction) {
     .setCustomId('user_answer_modal')
     .setTitle('🎯 إجاباتك على الأسئلة');
 
-  // نضيف كل سؤال كحقل نصي (غير قابل للتعديل) + أزرار اختيار
   let i = 0;
   for (const q of data.questions) {
     i++;
-    // نص السؤال (غير قابل للتعديل)
     const questionField = new TextInputBuilder()
       .setCustomId(`q_${i}_text`)
       .setLabel(`السؤال ${i}:`)
@@ -580,7 +573,6 @@ async function showQuestionsForUserModal(interaction) {
       .setStyle(TextInputStyle.Short)
       .setDisabled(true);
 
-    // أزرار الخيارات (A/B/C/D)
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`answer_${q.id}_0`)
@@ -606,7 +598,6 @@ async function showQuestionsForUserModal(interaction) {
     );
   }
 
-  // زر "إرسال الإجابات"
   const submitButton = new ButtonBuilder()
     .setCustomId('submit_answers')
     .setLabel('✅ إرسال الإجابات')
@@ -617,20 +608,6 @@ async function showQuestionsForUserModal(interaction) {
   await interaction.showModal(modal);
 }
 
-// ===============================
-// ✅ NEW: معالجة نموذج الإجابات (الأعضاء)
-// ===============================
-if (interaction.isModalSubmit()) {
-  if (interaction.customId === 'user_answer_modal') {
-    // لن نستخدم الحقول هنا — لأننا نستخدم أزرارًا فقط
-    // هذه الوظيفة تُستخدم فقط لفتح النموذج — الإجابات تُسجل عبر الأزرار
-    // لا حاجة لمعالجة هنا
-  }
-}
-
-// ----------------------------
-// عرض الإجابات الصحيحة/الخاطئة
-// ----------------------------
 async function showCountEmbed(interaction, title, count, members) {
   const embed = new EmbedBuilder()
     .setTitle(title)
